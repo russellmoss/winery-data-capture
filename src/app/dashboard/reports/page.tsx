@@ -110,8 +110,13 @@ export default function ReportsPage() {
   const chartData = metrics?.associates.map(a => ({
     name: a.name,
     captureRate: a.captureRate,
+    subscriptionRate: a.subscriptionRate,
     guestCount: a.guestCount,
-    profilesWithData: a.profilesWithData
+    profilesCreated: a.profilesCreated,
+    profilesWithEmail: a.profilesWithEmail,
+    profilesWithPhone: a.profilesWithPhone,
+    profilesWithData: a.profilesWithData,
+    profilesWithSubscription: a.profilesWithSubscription
   })) || []
 
   const yearChartData = yearComparison?.map(m => ({
@@ -264,14 +269,19 @@ export default function ReportsPage() {
             <p>Profiles with Data: {metrics.companyMetrics.totalProfilesWithData}</p>
             <p>Total Guest Count: {metrics.companyMetrics.totalGuestCount}</p>
             <p>Wedding Lead Profiles: {metrics.companyMetrics.profilesWithWeddingLeadTag}</p>
-            <p>Associate Data Capture Rate: {metrics.companyMetrics.associateDataCaptureRate}%</p>
-            <p>Company Data Capture Rate: {metrics.companyMetrics.companyDataCaptureRate}%</p>
-            <p>Company Data Capture Rate Less Weddings: {metrics.companyMetrics.companyDataCaptureRateLessWeddings}%</p>
+            <p>Associate Data Capture Rate: {metrics.companyMetrics.associateDataCaptureRate.toFixed(2)}%</p>
+            <p>Company Data Capture Rate: {metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%</p>
+            <p>Company Data Capture Rate Less Weddings: {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%</p>
+            <p>Total Profiles with Subscription: {metrics.companyMetrics.totalProfilesWithSubscription}</p>
+            <p>Overall Subscription Rate: {metrics.companyMetrics.overallSubscriptionRate.toFixed(2)}%</p>
+            <p>Associate Data Subscription Rate: {metrics.companyMetrics.associateDataSubscriptionRate.toFixed(2)}%</p>
+            <p>Company Data Subscription Rate: {metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%</p>
+            <p>Company Data Subscription Rate Less Weddings: {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%</p>
             <div className="mt-2">
               <p className="font-medium">Associate Details:</p>
               {metrics.associates.map((associate, index) => (
                 <p key={index} className="ml-2">
-                  {associate.name}: {associate.profilesCreated} profiles, {associate.profilesWithData} with data, {associate.guestCount} guests
+                  {associate.name}: {associate.profilesCreated} profiles, {associate.profilesWithEmail} with email, {associate.profilesWithPhone} with phone, {associate.profilesWithData} with data, {associate.profilesWithSubscription} subscribed, {associate.guestCount} guests
                 </p>
               ))}
             </div>
@@ -284,12 +294,17 @@ export default function ReportsPage() {
         <div className="mt-8">
           <h2 className="text-lg font-medium text-gray-900 mb-4">{metrics.period}</h2>
           
-          {/* Company Metrics Cards - Matching Python Script */}
+          {/* Data Capture Metrics */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">📊 Data Capture Metrics</h3>
+          </div>
+          
+          {/* Company Metrics Cards - Capture Rates */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-white p-6 rounded-lg shadow">
               <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA CAPTURE RATE</p>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {metrics.companyMetrics.associateDataCaptureRate}%
+                {metrics.companyMetrics.associateDataCaptureRate.toFixed(2)}%
               </p>
               <p className="text-xs text-gray-500 mt-1">Only associates with guest counts</p>
             </div>
@@ -297,7 +312,7 @@ export default function ReportsPage() {
             <div className="bg-white p-6 rounded-lg shadow">
               <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE</p>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {metrics.companyMetrics.companyDataCaptureRate}%
+                {metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%
               </p>
               <p className="text-xs text-gray-500 mt-1">All associates</p>
             </div>
@@ -305,7 +320,7 @@ export default function ReportsPage() {
             <div className="bg-white p-6 rounded-lg shadow">
               <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE LESS WEDDINGS</p>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {metrics.companyMetrics.companyDataCaptureRateLessWeddings}%
+                {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%
               </p>
               <p className="text-xs text-gray-500 mt-1">Excluding wedding leads</p>
             </div>
@@ -318,19 +333,72 @@ export default function ReportsPage() {
             </div>
           </div>
 
-          {/* Bar Chart */}
-          <div className="bg-white p-6 rounded-lg shadow mb-8">
-            <h3 className="text-lg font-medium text-gray-900 mb-4">Capture Rate by Associate</h3>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="captureRate" fill="#4F46E5" name="Capture Rate %" />
-              </BarChart>
-            </ResponsiveContainer>
+          {/* Subscription Rate Metrics */}
+          <div className="mb-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">📧 Email Subscription Metrics</h3>
+          </div>
+          
+          {/* Company Metrics Cards - Subscription Rates */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
+              <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA SUBSCRIPTION RATE</p>
+              <p className="mt-2 text-3xl font-semibold text-blue-600">
+                {metrics.companyMetrics.associateDataSubscriptionRate.toFixed(2)}%
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Email opt-in rate for associates tracking guests</p>
+              <p className="text-xs text-gray-400 mt-1">
+                {metrics.companyMetrics.totalProfilesWithSubscription} subscribed profiles
+              </p>
+            </div>
+            
+            <div className="bg-white p-6 rounded-lg shadow border-l-4 border-green-500">
+              <p className="text-sm font-medium text-gray-500">COMPANY DATA SUBSCRIPTION RATE</p>
+              <p className="mt-2 text-3xl font-semibold text-green-600">
+                {metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Overall email opt-in rate</p>
+              <p className="text-xs text-gray-400 mt-1">All associates included</p>
+            </div>
+            
+            <div className="bg-white p-6 rounded-lg shadow border-l-4 border-purple-500">
+              <p className="text-sm font-medium text-gray-500">COMPANY SUBSCRIPTION RATE (NO WEDDINGS)</p>
+              <p className="mt-2 text-3xl font-semibold text-purple-600">
+                {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%
+              </p>
+              <p className="text-xs text-gray-500 mt-1">Email opt-in excluding wedding leads</p>
+              <p className="text-xs text-gray-400 mt-1">Wedding leads excluded</p>
+            </div>
+          </div>
+
+          {/* Bar Charts */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Capture Rate by Associate</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="captureRate" fill="#4F46E5" name="Capture Rate %" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Subscription Rate by Associate</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="subscriptionRate" fill="#10B981" name="Subscription Rate %" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
           {/* Associates Table */}
@@ -342,16 +410,28 @@ export default function ReportsPage() {
                     Associate
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Profiles Created
+                    New Profiles
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    With Email
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    With Phone
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     With Data
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Subscribed
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Guest Count
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Capture Rate
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Subscribe Rate
                   </th>
                 </tr>
               </thead>
@@ -365,13 +445,25 @@ export default function ReportsPage() {
                       {associate.profilesCreated}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {associate.profilesWithEmail}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {associate.profilesWithPhone}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {associate.profilesWithData}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {associate.profilesWithSubscription}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       {associate.guestCount}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {associate.captureRate}%
+                      {associate.captureRate.toFixed(2)}%
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {associate.subscriptionRate.toFixed(2)}%
                     </td>
                   </tr>
                 ))}

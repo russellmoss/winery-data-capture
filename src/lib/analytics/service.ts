@@ -1,6 +1,38 @@
 import { commerce7Client } from '@/lib/commerce7/client'
 import { startOfMonth, endOfMonth, subYears, format } from 'date-fns'
 import { findBestAssociateMatch } from './nameMatching'
+import { C7Order, C7Customer } from '@/lib/commerce7/types'
+
+// Extended customer type for analytics with email marketing status
+interface C7CustomerWithMarketing extends C7Customer {
+  emailMarketingStatus?: string
+}
+
+interface AssociateStats {
+  profilesCreated: Set<string>
+  profilesWithEmail: Set<string>
+  profilesWithPhone: Set<string>
+  profilesWithData: Set<string>
+  profilesWithDataNoWedding: Set<string>
+  profilesWithSubscription: Set<string>
+  profilesWithSubscriptionNoWedding: Set<string>
+  profilesWithWeddingTag: Set<string>
+  manuallyCreatedProfiles: Set<string>
+  totalOrders: number
+}
+
+interface FinalStats {
+  profilesCreated: number
+  profilesWithEmail: number
+  profilesWithPhone: number
+  profilesWithData: number
+  profilesWithDataNoWedding: number
+  profilesWithSubscription: number
+  profilesWithSubscriptionNoWedding: number
+  profilesWithWeddingTag: number
+  manuallyCreatedProfiles: number
+  totalOrders: number
+}
 
 // Constants from Commerce7 - matching tasting_room_data_capture.py exactly
 const GUEST_COUNT_SKU_ID = "7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"
@@ -33,14 +65,20 @@ export interface AssociateMetrics {
 export interface CompanyMetrics {
   totalProfiles: number
   totalProfilesWithData: number
+  totalProfilesWithSubscription: number
   totalGuestCount: number
   overallCaptureRate: number
+  overallSubscriptionRate: number
   profilesWithWeddingLeadTag: number
   captureRateExcludingWeddingLeads: number
+  subscriptionRateExcludingWeddingLeads: number
   // Python script metrics
   associateDataCaptureRate: number
+  associateDataSubscriptionRate: number
   companyDataCaptureRate: number
+  companyDataSubscriptionRate: number
   companyDataCaptureRateLessWeddings: number
+  companyDataSubscriptionRateLessWeddings: number
 }
 
 export interface MonthlyComparison {
@@ -52,39 +90,25 @@ export interface MonthlyComparison {
 
 class AnalyticsService {
   async getDataCaptureMetrics(startDate: Date, endDate: Date): Promise<DataCaptureMetrics> {
-    console.log(`Analytics: Starting data capture metrics for ${startDate.toISOString()} to ${endDate.toISOString()}`)
-    console.log(`Analytics: Looking for wedding lead tag ID: ${WEDDING_LEAD_TAG_ID}`)
+    console.log(`Analytics: Starting data processing for ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
     
     // Fetch both orders and customers for the period
+    console.log('Analytics: Fetching orders and customers in parallel...')
     const [orders, customers] = await Promise.all([
       commerce7Client.getOrdersByDateRange(startDate, endDate),
       commerce7Client.getCustomersByDateRange(startDate, endDate)
     ])
     
-    console.log(`Analytics: Fetched ${orders.length} orders and ${customers.length} customers`)
-    
-    // Debug: Log sample customer data to understand structure
-    if (customers.length > 0) {
-      console.log('Analytics: Sample customer data structure:')
-      const sampleCustomer = customers[0]
-      if (sampleCustomer) {
-        console.log(`  Customer ID: ${sampleCustomer.id}`)
-        console.log(`  Name: ${sampleCustomer.firstName} ${sampleCustomer.lastName}`)
-        console.log(`  Email: ${sampleCustomer.email}`)
-        console.log(`  Emails array: ${JSON.stringify(sampleCustomer.emails)}`)
-        console.log(`  Phones array: ${JSON.stringify(sampleCustomer.phones)}`)
-        console.log(`  MetaData: ${JSON.stringify(sampleCustomer.metaData)}`)
-        console.log(`  Tags: ${JSON.stringify(sampleCustomer.tags)}`)
-        console.log(`  CreatedAt: ${sampleCustomer.createdAt}`)
-      }
-    }
+    console.log(`Analytics: Data fetch complete - ${orders.length} orders, ${customers.length} customers`)
 
     // Analyze orders and customers using Python script logic
+    console.log('Analytics: Starting data analysis...')
     const { associateStats, guestCounts } = this.analyzeOrdersForDataCapture(
       orders, customers
     )
 
     // Calculate data capture rates using Python script logic
+    console.log('Analytics: Calculating capture rates...')
     const results = this.calculateDataCaptureRates(associateStats, guestCounts)
 
     // Convert to our interface format
@@ -114,16 +138,24 @@ class AnalyticsService {
     const companyMetrics: CompanyMetrics = {
       totalProfiles: companyTotal?.newProfiles || 0,
       totalProfilesWithData: companyTotal?.withData || 0,
+      totalProfilesWithSubscription: companyTotal?.subscribed || 0,
       totalGuestCount: companyTotal?.guestCount || 0,
       overallCaptureRate: companyTotal?.captureRate || 0,
+      overallSubscriptionRate: companyTotal?.subscriptionRate || 0,
       profilesWithWeddingLeadTag: companyTotal?.weddingLeads || 0,
       captureRateExcludingWeddingLeads: companyLessWedding?.captureRate || 0,
+      subscriptionRateExcludingWeddingLeads: companyLessWedding?.subscriptionRate || 0,
       // Python script metrics
       associateDataCaptureRate: associateTotal?.captureRate || 0,
+      associateDataSubscriptionRate: associateTotal?.subscriptionRate || 0,
       companyDataCaptureRate: companyTotal?.captureRate || 0,
-      companyDataCaptureRateLessWeddings: companyLessWedding?.captureRate || 0
+      companyDataSubscriptionRate: companyTotal?.subscriptionRate || 0,
+      companyDataCaptureRateLessWeddings: companyLessWedding?.captureRate || 0,
+      companyDataSubscriptionRateLessWeddings: companyLessWedding?.subscriptionRate || 0
     }
 
+    console.log(`Analytics: Processing complete - ${associateMetrics.length} associates analyzed`)
+    
     return {
       period: `${format(startDate, 'MMM dd, yyyy')} - ${format(endDate, 'MMM dd, yyyy')}`,
       startDate,
@@ -134,37 +166,26 @@ class AnalyticsService {
   }
 
   private analyzeOrdersForDataCapture(
-    orders: any[],
-    customers: any[]
-  ): { associateStats: Map<string, any>, guestCounts: Map<string, number> } {
+    orders: C7Order[],
+    customers: C7Customer[]
+  ): { associateStats: Map<string, FinalStats>, guestCounts: Map<string, number> } {
     
     // Initialize data structures
-    const associateStats = new Map<string, {
-      profilesCreated: Set<string>
-      profilesWithEmail: Set<string>
-      profilesWithPhone: Set<string>
-      profilesWithData: Set<string>
-      profilesWithDataNoWedding: Set<string>
-      profilesWithSubscription: Set<string>
-      profilesWithWeddingTag: Set<string>
-      manuallyCreatedProfiles: Set<string> // New: track manual creations
-      totalOrders: number
-    }>()
+    const associateStats = new Map<string, AssociateStats>()
 
     const guestCounts = new Map<string, number>()
     const customersWithWeddingTag = new Set<string>()
     const manuallyCreatedCustomers = new Map<string, string>() // customerId -> associate name
 
     // First pass: identify all manually created customers with metadata
-    console.log('Analytics: Checking for manually created profiles with associate attribution...')
     for (const customer of customers) {
       if (customer.metaData && customer.metaData['associate-sign-up-attribution']) {
         const attributedAssociate = customer.metaData['associate-sign-up-attribution']
-        console.log(`  Found manual profile: ${customer.firstName} ${customer.lastName} attributed to "${attributedAssociate}"`)
-        manuallyCreatedCustomers.set(customer.id, attributedAssociate)
+        if (customer.id) {
+          manuallyCreatedCustomers.set(customer.id, attributedAssociate)
+        }
       }
     }
-    console.log(`Analytics: Found ${manuallyCreatedCustomers.size} manually created profiles with attribution`)
 
     // Get list of all known associates from orders
     const knownAssociates = new Set<string>()
@@ -177,13 +198,11 @@ class AnalyticsService {
 
     // Match metadata names to actual associates
     const metadataToAssociateMap = new Map<string, string>()
-    for (const [customerId, metadataName] of manuallyCreatedCustomers.entries()) {
+    for (const [customerId, metadataName] of Array.from(manuallyCreatedCustomers.entries())) {
       const matchResult = findBestAssociateMatch(metadataName, Array.from(knownAssociates))
       if (matchResult) {
-        console.log(`  Matched "${metadataName}" to "${matchResult.match}" (confidence: ${matchResult.confidence.toFixed(1)}%)`)
         metadataToAssociateMap.set(customerId, matchResult.match)
       } else {
-        console.log(`  Could not match "${metadataName}" to any known associate`)
         metadataToAssociateMap.set(customerId, `Manual Entry - ${metadataName}`)
       }
     }
@@ -191,11 +210,11 @@ class AnalyticsService {
     // Process wedding tag customers
     for (const customer of customers) {
       if (customer.tags && Array.isArray(customer.tags)) {
-        const hasWeddingTag = customer.tags.some((tag: any) => 
-          tag.id === WEDDING_LEAD_TAG_ID || 
+        const hasWeddingTag = customer.tags.some((tag) => 
+          (typeof tag === 'object' && tag.id === WEDDING_LEAD_TAG_ID) || 
           (typeof tag === 'string' && tag === WEDDING_LEAD_TAG_ID)
         )
-        if (hasWeddingTag) {
+        if (hasWeddingTag && customer.id) {
           customersWithWeddingTag.add(customer.id)
         }
       }
@@ -204,8 +223,8 @@ class AnalyticsService {
     // Track which customers are associated with which associates through orders
     const customerToAssociate = new Map<string, string>()
     const sortedOrders = [...orders].sort((a, b) => {
-      const dateA = new Date(a.orderPaidDate || a.orderDate || 0).getTime()
-      const dateB = new Date(b.orderPaidDate || b.orderDate || 0).getTime()
+      const dateA = new Date(a.orderPaidDate || a.orderSubmittedDate || 0).getTime()
+      const dateB = new Date(b.orderPaidDate || b.orderSubmittedDate || 0).getTime()
       return dateA - dateB
     })
 
@@ -229,14 +248,15 @@ class AnalyticsService {
       // Initialize associate stats if needed
       if (!associateStats.has(associateName)) {
         associateStats.set(associateName, {
-          profilesCreated: new Set(),
-          profilesWithEmail: new Set(),
-          profilesWithPhone: new Set(),
-          profilesWithData: new Set(),
-          profilesWithDataNoWedding: new Set(),
-          profilesWithSubscription: new Set(),
-          profilesWithWeddingTag: new Set(),
-          manuallyCreatedProfiles: new Set(),
+          profilesCreated: new Set<string>(),
+          profilesWithEmail: new Set<string>(),
+          profilesWithPhone: new Set<string>(),
+          profilesWithData: new Set<string>(),
+          profilesWithDataNoWedding: new Set<string>(),
+          profilesWithSubscription: new Set<string>(),
+          profilesWithSubscriptionNoWedding: new Set<string>(),
+          profilesWithWeddingTag: new Set<string>(),
+          manuallyCreatedProfiles: new Set<string>(),
           totalOrders: 0
         })
       }
@@ -279,14 +299,15 @@ class AnalyticsService {
       // Initialize associate stats if needed
       if (!associateStats.has(associateName)) {
         associateStats.set(associateName, {
-          profilesCreated: new Set(),
-          profilesWithEmail: new Set(),
-          profilesWithPhone: new Set(),
-          profilesWithData: new Set(),
-          profilesWithDataNoWedding: new Set(),
-          profilesWithSubscription: new Set(),
-          profilesWithWeddingTag: new Set(),
-          manuallyCreatedProfiles: new Set(),
+          profilesCreated: new Set<string>(),
+          profilesWithEmail: new Set<string>(),
+          profilesWithPhone: new Set<string>(),
+          profilesWithData: new Set<string>(),
+          profilesWithDataNoWedding: new Set<string>(),
+          profilesWithSubscription: new Set<string>(),
+          profilesWithSubscriptionNoWedding: new Set<string>(),
+          profilesWithWeddingTag: new Set<string>(),
+          manuallyCreatedProfiles: new Set<string>(),
           totalOrders: 0
         })
       }
@@ -298,7 +319,7 @@ class AnalyticsService {
       const customerPhones = this.extractCustomerPhones(customer)
       const hasEmail = customerEmails.length > 0
       const hasPhone = customerPhones.length > 0
-      const isSubscribed = customer.emailMarketingStatus === "Subscribed"
+      const isSubscribed = (customer as C7CustomerWithMarketing).emailMarketingStatus === "Subscribed"
       const hasWeddingTag = customersWithWeddingTag.has(customerId)
 
       // Track the profile
@@ -327,6 +348,9 @@ class AnalyticsService {
 
       if (isSubscribed) {
         stats.profilesWithSubscription.add(customerId)
+        if (!hasWeddingTag) {
+          stats.profilesWithSubscriptionNoWedding.add(customerId)
+        }
       }
 
       if (hasWeddingTag) {
@@ -334,25 +358,18 @@ class AnalyticsService {
       }
     }
 
-    // Log summary of manual attributions
+    // Track manual attributions (removed logging for performance)
     const manualAttributionSummary = new Map<string, number>()
-    for (const associate of associateStats.keys()) {
+    for (const associate of Array.from(associateStats.keys())) {
       const manualCount = associateStats.get(associate)!.manuallyCreatedProfiles.size
       if (manualCount > 0) {
         manualAttributionSummary.set(associate, manualCount)
       }
     }
-    
-    if (manualAttributionSummary.size > 0) {
-      console.log('\nAnalytics: Manual Profile Attribution Summary:')
-      for (const [associate, count] of manualAttributionSummary.entries()) {
-        console.log(`  ${associate}: ${count} manually created profiles`)
-      }
-    }
 
     // Convert sets to counts
-    const finalStats = new Map<string, any>()
-    for (const [associate, stats] of associateStats.entries()) {
+    const finalStats = new Map<string, FinalStats>()
+    for (const [associate, stats] of Array.from(associateStats.entries())) {
       finalStats.set(associate, {
         profilesCreated: stats.profilesCreated.size,
         profilesWithEmail: stats.profilesWithEmail.size,
@@ -360,30 +377,24 @@ class AnalyticsService {
         profilesWithData: stats.profilesWithData.size,
         profilesWithDataNoWedding: stats.profilesWithDataNoWedding.size,
         profilesWithSubscription: stats.profilesWithSubscription.size,
+        profilesWithSubscriptionNoWedding: stats.profilesWithSubscriptionNoWedding.size,
         profilesWithWeddingTag: stats.profilesWithWeddingTag.size,
         manuallyCreatedProfiles: stats.manuallyCreatedProfiles.size,
         totalOrders: stats.totalOrders
       })
     }
 
-    // Debug output
-    console.log(`Analytics: Processed ${customers.length} total customers`)
-    console.log(`Analytics: Found ${customersWithWeddingTag.size} customers with wedding lead tag`)
-    console.log(`Analytics: Customers with orders: ${customerToAssociate.size}`)
-    console.log(`Analytics: Associates/companies with data: ${finalStats.size}`)
-
-    // Debug guest counts
+    // Basic validation (minimal logging)
     const totalGuestCount = Array.from(guestCounts.values()).reduce((sum, count) => sum + count, 0)
-    console.log(`Analytics: Total guest count tracked: ${totalGuestCount}`)
     if (totalGuestCount === 0) {
-      console.log("Analytics: WARNING: No guest counts found! Check if guest SKUs are being used in orders.")
+      console.warn("Analytics: No guest counts found - check guest SKU configuration")
     }
 
     return { associateStats: finalStats, guestCounts }
   }
 
   private calculateDataCaptureRates(
-    associateStats: Map<string, any>,
+    associateStats: Map<string, FinalStats>,
     guestCounts: Map<string, number>
   ): Array<{
     associate: string
@@ -394,18 +405,34 @@ class AnalyticsService {
     withData: number
     withDataNoWedding: number
     subscribed: number
+    subscribedNoWedding: number
     weddingLeads: number
     totalOrders: number
     guestCount: number
     captureRate: number
     subscriptionRate: number
   }> {
-    const results: Array<any> = []
+    const results: Array<{
+      associate: string
+      newProfiles: number
+      manualProfiles: number
+      withEmail: number
+      withPhone: number
+      withData: number
+      withDataNoWedding: number
+      subscribed: number
+      subscribedNoWedding: number
+      weddingLeads: number
+      totalOrders: number
+      guestCount: number
+      captureRate: number
+      subscriptionRate: number
+    }> = []
 
     // Get all associates from both sources (matching Python logic)
-    const allAssociates = new Set([...associateStats.keys(), ...guestCounts.keys()])
+    const allAssociates = new Set([...Array.from(associateStats.keys()), ...Array.from(guestCounts.keys())])
 
-    for (const associate of allAssociates) {
+    for (const associate of Array.from(allAssociates)) {
       if (associate.includes('***')) continue
       
       const stats = associateStats.get(associate) || {
@@ -415,6 +442,7 @@ class AnalyticsService {
         profilesWithData: 0,
         profilesWithDataNoWedding: 0,
         profilesWithSubscription: 0,
+        profilesWithSubscriptionNoWedding: 0,
         profilesWithWeddingTag: 0,
         manuallyCreatedProfiles: 0,
         totalOrders: 0
@@ -439,6 +467,7 @@ class AnalyticsService {
         withData: stats.profilesWithData,
         withDataNoWedding: stats.profilesWithDataNoWedding,
         subscribed: stats.profilesWithSubscription,
+        subscribedNoWedding: stats.profilesWithSubscriptionNoWedding,
         weddingLeads: stats.profilesWithWeddingTag,
         totalOrders: stats.totalOrders,
         guestCount,
@@ -467,10 +496,13 @@ class AnalyticsService {
     }
 
     // Calculate Company Data Capture Rate (all associates)
-    const totalProfilesWithData = results.reduce((sum, r) => sum + r.withData, 0)
-    const totalProfilesWithSubscription = results.reduce((sum, r) => sum + r.subscribed, 0)
+    const totalProfilesWithData = Array.from(associateStats.values())
+      .reduce((sum, stats) => sum + (stats.profilesWithData || 0), 0)
+    const totalProfilesWithSubscription = Array.from(associateStats.values())
+      .reduce((sum, stats) => sum + (stats.profilesWithSubscription || 0), 0)
     const totalGuests = results.reduce((sum, r) => sum + r.guestCount, 0)
-    const totalWeddingLeads = results.reduce((sum, r) => sum + r.weddingLeads, 0)
+    const totalWeddingLeads = Array.from(associateStats.values())
+      .reduce((sum, stats) => sum + (stats.profilesWithWeddingTag || 0), 0)
     const companyCaptureRate = totalGuests > 0 ? (totalProfilesWithData / totalGuests * 100) : 0
     const companySubscriptionRate = totalGuests > 0 ? (totalProfilesWithSubscription / totalGuests * 100) : 0
 
@@ -479,6 +511,12 @@ class AnalyticsService {
     const totalProfilesWithDataNoWedding = Array.from(associateStats.values())
       .reduce((sum, stats) => sum + (stats.profilesWithDataNoWedding || 0), 0)
     const companyCaptureRateLessWeddings = totalGuests > 0 ? (totalProfilesWithDataNoWedding / totalGuests * 100) : 0
+
+    // Calculate Company Data Subscription Rate LESS Wedding Leads
+    // Use the profilesWithSubscriptionNoWedding field which excludes wedding leads from subscription tracking
+    const totalProfilesWithSubscriptionNoWedding = Array.from(associateStats.values())
+      .reduce((sum, stats) => sum + (stats.profilesWithSubscriptionNoWedding || 0), 0)
+    const companySubscriptionRateLessWeddings = totalGuests > 0 ? (totalProfilesWithSubscriptionNoWedding / totalGuests * 100) : 0
 
     // Add aggregate rows (matching Python script exactly)
     results.push({
@@ -490,6 +528,7 @@ class AnalyticsService {
       withData: associateProfilesWithData,
       withDataNoWedding: associateProfilesWithData, // Associates don't track this separately
       subscribed: associateProfilesWithSubscription,
+      subscribedNoWedding: associateProfilesWithSubscription, // Associates don't track this separately
       weddingLeads: associatesWithGuests.reduce((sum, r) => sum + r.weddingLeads, 0),
       totalOrders: associatesWithGuests.reduce((sum, r) => sum + r.totalOrders, 0),
       guestCount: associateTotalGuests,
@@ -506,6 +545,7 @@ class AnalyticsService {
       withData: totalProfilesWithData,
       withDataNoWedding: totalProfilesWithData, // Company total includes all
       subscribed: totalProfilesWithSubscription,
+      subscribedNoWedding: totalProfilesWithSubscription, // Company total includes all
       weddingLeads: totalWeddingLeads,
       totalOrders: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.totalOrders, 0),
       guestCount: totalGuests,
@@ -521,12 +561,13 @@ class AnalyticsService {
       withPhone: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.withPhone, 0),
       withData: totalProfilesWithDataNoWedding,
       withDataNoWedding: totalProfilesWithDataNoWedding,
-      subscribed: totalProfilesWithSubscription,
+      subscribed: totalProfilesWithSubscriptionNoWedding,
+      subscribedNoWedding: totalProfilesWithSubscriptionNoWedding,
       weddingLeads: 0, // By definition, this excludes wedding leads
       totalOrders: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.totalOrders, 0),
       guestCount: totalGuests,
       captureRate: Math.round(companyCaptureRateLessWeddings * 100) / 100,
-      subscriptionRate: Math.round(companySubscriptionRate * 100) / 100
+      subscriptionRate: Math.round(companySubscriptionRateLessWeddings * 100) / 100
     })
 
     return results
@@ -535,6 +576,9 @@ class AnalyticsService {
   async getYearOverYearComparison(): Promise<MonthlyComparison[]> {
     const currentYear = new Date().getFullYear()
     const comparisons: MonthlyComparison[] = []
+
+    // Use more conservative rate limiting for year comparison
+    commerce7Client.setRateLimitConfig({ maxRequestsPerSecond: 0.5, burstLimit: 2 })
 
     for (let month = 0; month < 12; month++) {
       const currentYearStart = startOfMonth(new Date(currentYear, month, 1))
@@ -546,10 +590,9 @@ class AnalyticsService {
       // Skip future months
       if (currentYearStart > new Date()) break
 
-      const [currentMetrics, previousMetrics] = await Promise.all([
-        this.getDataCaptureMetrics(currentYearStart, currentYearEnd),
-        this.getDataCaptureMetrics(previousYearStart, previousYearEnd)
-      ])
+      // Process sequentially to avoid rate limiting
+      const currentMetrics = await this.getDataCaptureMetrics(currentYearStart, currentYearEnd)
+      const previousMetrics = await this.getDataCaptureMetrics(previousYearStart, previousYearEnd)
 
       const percentageChange = previousMetrics.companyMetrics.overallCaptureRate > 0
         ? Number((((currentMetrics.companyMetrics.overallCaptureRate - previousMetrics.companyMetrics.overallCaptureRate) / 
@@ -564,11 +607,14 @@ class AnalyticsService {
       })
     }
 
+    // Reset rate limiting to normal for other operations
+    commerce7Client.setRateLimitConfig({ maxRequestsPerSecond: 1, burstLimit: 3 })
+
     return comparisons
   }
 
   // Add helper method for extracting associate name
-  private extractAssociateName(order: any): string {
+  private extractAssociateName(order: C7Order): string {
     if (order.salesAssociate) {
       if (typeof order.salesAssociate === 'object' && order.salesAssociate.name) {
         return order.salesAssociate.name
@@ -580,10 +626,10 @@ class AnalyticsService {
   }
 
   // Add helper methods for extracting customer data
-  private extractCustomerEmails(customer: any): string[] {
+  private extractCustomerEmails(customer: C7Customer): string[] {
     const emails = []
     if (customer.emails && Array.isArray(customer.emails)) {
-      emails.push(...customer.emails.map((e: any) => e.email || e))
+      emails.push(...customer.emails.map((e) => typeof e === 'object' ? e.email : e))
     }
     if (customer.email && !emails.includes(customer.email)) {
       emails.push(customer.email)
@@ -591,10 +637,10 @@ class AnalyticsService {
     return emails.filter(e => e)
   }
 
-  private extractCustomerPhones(customer: any): string[] {
+  private extractCustomerPhones(customer: C7Customer): string[] {
     const phones = []
     if (customer.phones && Array.isArray(customer.phones)) {
-      phones.push(...customer.phones.map((p: any) => p.phone || p))
+      phones.push(...customer.phones.map((p) => typeof p === 'object' ? p.phone : p))
     }
     if (customer.phone && !phones.includes(customer.phone)) {
       phones.push(customer.phone)

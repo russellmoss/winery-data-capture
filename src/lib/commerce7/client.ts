@@ -10,9 +10,18 @@ interface RetryConfig {
   retryDelay: number
 }
 
+interface RateLimitConfig {
+  maxRequestsPerSecond: number
+  burstLimit: number
+}
+
 class Commerce7Client {
   private client: AxiosInstance
   private retryConfig: RetryConfig = { retries: 3, retryDelay: 1000 }
+  private rateLimitConfig: RateLimitConfig = { maxRequestsPerSecond: 1, burstLimit: 3 }
+  private requestQueue: Array<() => Promise<any>> = []
+  private isProcessingQueue = false
+  private lastRequestTime = 0
   
   constructor() {
     try {
@@ -36,13 +45,74 @@ class Commerce7Client {
     }
   }
 
+  // Method to configure rate limiting for different scenarios
+  setRateLimitConfig(config: Partial<RateLimitConfig>) {
+    this.rateLimitConfig = { ...this.rateLimitConfig, ...config }
+  }
+
+  private async rateLimitedRequest<T>(requestFn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push(async () => {
+        try {
+          const result = await this.executeWithRetry(requestFn)
+          resolve(result)
+        } catch (error) {
+          reject(error)
+        }
+      })
+      
+      this.processQueue()
+    })
+  }
+
+  private async executeWithRetry<T>(requestFn: () => Promise<T>, attempt: number = 1): Promise<T> {
+    try {
+      return await requestFn()
+    } catch (error: any) {
+      if (error.statusCode === 429 && attempt <= this.retryConfig.retries) {
+        const backoffDelay = Math.min(1000 * Math.pow(2, attempt - 1), 30000) // Exponential backoff, max 30s
+        await new Promise(resolve => setTimeout(resolve, backoffDelay))
+        return this.executeWithRetry(requestFn, attempt + 1)
+      }
+      throw error
+    }
+  }
+
+  private async processQueue() {
+    if (this.isProcessingQueue || this.requestQueue.length === 0) {
+      return
+    }
+
+    this.isProcessingQueue = true
+
+    while (this.requestQueue.length > 0) {
+      const now = Date.now()
+      const timeSinceLastRequest = now - this.lastRequestTime
+      const minInterval = 1000 / this.rateLimitConfig.maxRequestsPerSecond
+
+      if (timeSinceLastRequest < minInterval) {
+        const delay = minInterval - timeSinceLastRequest
+        await new Promise(resolve => setTimeout(resolve, delay))
+      }
+
+      const request = this.requestQueue.shift()
+      if (request) {
+        this.lastRequestTime = Date.now()
+        try {
+          await request()
+        } catch (error) {
+          console.error('Commerce7: Request failed in queue:', error)
+        }
+      }
+    }
+
+    this.isProcessingQueue = false
+  }
+
   private setupInterceptors() {
     // Request interceptor
     this.client.interceptors.request.use(
-      (config) => {
-        console.log(`Making request to: ${config.method?.toUpperCase()} ${config.url}`)
-        return config
-      },
+      (config) => config,
       (error) => {
         return Promise.reject(handleError(error))
       }
@@ -142,7 +212,6 @@ class Commerce7Client {
         // Update existing customer
         const customer = existingCustomers[0]
         if (customer && customer.id) {
-          console.log('Customer already exists, updating instead of creating new one')
           
           // Prepare update data without associateName (it goes in metadata)
           const { associateName, ...customerData } = data
@@ -210,9 +279,7 @@ class Commerce7Client {
         }
       }
       
-      console.log('Creating customer with payload:', JSON.stringify(payload, null, 2))
       const response = await this.client.post('/customer', payload)
-      console.log('Customer created successfully:', response.data)
       return response.data
     } catch (error) {
       console.error('Error creating customer:', error)
@@ -292,25 +359,24 @@ class Commerce7Client {
   }
 
   async getOrdersByDateRange(startDate: Date, endDate: Date): Promise<C7Order[]> {
-    console.log(`Commerce7: Fetching orders from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
     
     let allOrders: C7Order[] = []
     let page = 1
     let hasMorePages = true
     
     while (hasMorePages) {
-      const response = await this.client.get('/order', {
-        params: {
-          orderPaidDate: `btw:${startDate.toISOString().split('T')[0]}|${endDate.toISOString().split('T')[0]}`,
-          page: page,
-          limit: 50 // Commerce7 maximum limit
-        }
-      })
+      const response = await this.rateLimitedRequest(() => 
+        this.client.get('/order', {
+          params: {
+            orderPaidDate: `btw:${startDate.toISOString().split('T')[0]}|${endDate.toISOString().split('T')[0]}`,
+            page: page,
+            limit: 50 // Commerce7 maximum limit
+          }
+        })
+      )
       
       const orders = response.data.orders || []
       allOrders = allOrders.concat(orders)
-      
-      console.log(`Commerce7: Fetched page ${page}: ${orders.length} orders (total: ${allOrders.length})`)
       
       // Check if we have more pages
       if (orders.length < 50) {
@@ -321,29 +387,20 @@ class Commerce7Client {
       
       // Safety limit
       if (page > 100) {
-        console.log('Commerce7: Reached page limit of 100 for orders')
         break
       }
     }
     
-    console.log(`Commerce7: Found ${allOrders.length} total orders in date range`)
-    
-    // Log sample order data
-    if (allOrders.length > 0) {
-      console.log('Commerce7: Sample order from API:')
-      const sample = allOrders[0]
-      console.log(`  Order ID: ${sample.id}`)
-      console.log(`  Order Number: ${sample.orderNumber}`)
-      console.log(`  Sales Associate: ${JSON.stringify(sample.salesAssociate)}`)
-      console.log(`  Customer: ${JSON.stringify(sample.customer)}`)
-      console.log(`  Items: ${JSON.stringify(sample.items)}`)
+    // Basic validation only
+    if (allOrders.length === 0) {
+      console.warn('Commerce7: No orders found in date range')
     }
     
     return allOrders
   }
 
   async getCustomersByDateRange(startDate: Date, endDate: Date): Promise<C7Customer[]> {
-    console.log(`Commerce7: Fetching customers from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
+    console.log(`Commerce7: Starting customer fetch for ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
     
     // Fix: Add one day to endDate to make the range inclusive of the end date
     const inclusiveEndDate = new Date(endDate)
@@ -354,21 +411,23 @@ class Commerce7Client {
     let hasMorePages = true
     
     while (hasMorePages) {
-      const response = await this.client.get('/customer', {
-        params: {
-          createdAt: `btw:${startDate.toISOString().split('T')[0]}|${inclusiveEndDate.toISOString().split('T')[0]}`,
-          page: page,
-          limit: 50 // Commerce7 maximum limit
-        }
-      })
-      
-      // Log the raw API response structure
-      console.log(`Commerce7: Raw API response for page ${page}:`, JSON.stringify(response.data, null, 2))
+      const response = await this.rateLimitedRequest(() => 
+        this.client.get('/customer', {
+          params: {
+            createdAt: `btw:${startDate.toISOString().split('T')[0]}|${inclusiveEndDate.toISOString().split('T')[0]}`,
+            page: page,
+            limit: 50 // Commerce7 maximum limit
+          }
+        })
+      )
       
       const customers = response.data.customers || []
       allCustomers = allCustomers.concat(customers)
       
-      console.log(`Commerce7: Fetched page ${page}: ${customers.length} customers (total: ${allCustomers.length})`)
+      // Progress logging for customer fetching
+      if (page % 5 === 0 || customers.length < 50) {
+        console.log(`Commerce7: Customer page ${page}: ${customers.length} customers (total: ${allCustomers.length})`)
+      }
       
       // Check if we have more pages
       if (customers.length < 50) {
@@ -379,52 +438,16 @@ class Commerce7Client {
       
       // Safety limit
       if (page > 100) {
-        console.log('Commerce7: Reached page limit of 100 for customers')
+        console.warn('Commerce7: Reached customer page limit of 100')
         break
       }
     }
     
-    console.log(`Commerce7: Found ${allCustomers.length} total customers in date range`)
+    console.log(`Commerce7: Customer fetch completed: ${allCustomers.length} customers found`)
     
-    // Log detailed information about each customer
-    allCustomers.forEach((customer, index) => {
-      console.log(`Commerce7: Customer ${index + 1} (ID: ${customer.id})`)
-      console.log(`  - Raw tags property: ${JSON.stringify(customer.tags)}`)
-      console.log(`  - Raw metaData property: ${JSON.stringify(customer.metaData)}`)
-      console.log(`  - Tags type: ${typeof customer.tags}, is array: ${Array.isArray(customer.tags)}`)
-      console.log(`  - MetaData type: ${typeof customer.metaData}, is object: ${typeof customer.metaData === 'object'}`)
-      
-      // Check if tags is an array and has items
-      if (Array.isArray(customer.tags) && customer.tags.length > 0) {
-        console.log(`  - Tags array length: ${customer.tags.length}`)
-        customer.tags.forEach((tag, tagIndex) => {
-          console.log(`    - Tag ${tagIndex}: ${JSON.stringify(tag)}`)
-        });
-      } else {
-        console.log(`  - No tags found or tags is not an array`)
-      }
-      
-      // Check for specific metadata keys
-      if (customer.metaData && typeof customer.metaData === 'object') {
-        const metadataKeys = Object.keys(customer.metaData)
-        console.log(`  - Metadata keys: ${metadataKeys.join(', ')}`)
-        if (metadataKeys.includes('associate-sign-up-attribution')) {
-          console.log(`  - *** FOUND associate-sign-up-attribution: ${customer.metaData['associate-sign-up-attribution']} ***`)
-        }
-      }
-    })
-    
-    // Also check for the specific test customer we just created
-    const testCustomerId = '35067153-a3a3-4c9c-81cc-448b7b1297cd'
-    const testCustomer = allCustomers.find(c => c.id === testCustomerId)
-    if (testCustomer) {
-      console.log('Commerce7: Found our test customer in the results:')
-      console.log(`  ID: ${testCustomer.id}`)
-      console.log(`  Name: ${testCustomer.firstName} ${testCustomer.lastName}`)
-      console.log(`  MetaData: ${JSON.stringify(testCustomer.metaData)}`)
-      console.log(`  CreatedAt: ${testCustomer.createdAt}`)
-    } else {
-      console.log('Commerce7: Test customer not found in date range results')
+    // Basic validation only
+    if (allCustomers.length === 0) {
+      console.warn('Commerce7: No customers found in date range')
     }
     
     return allCustomers
