@@ -1,5 +1,6 @@
 import { commerce7Client } from '@/lib/commerce7/client'
 import { startOfMonth, endOfMonth, subYears, format } from 'date-fns'
+import { findBestAssociateMatch } from './nameMatching'
 
 // Constants from Commerce7 - matching tasting_room_data_capture.py exactly
 const GUEST_COUNT_SKU_ID = "7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"
@@ -16,6 +17,7 @@ export interface DataCaptureMetrics {
 export interface AssociateMetrics {
   name: string
   profilesCreated: number
+  manualProfiles: number
   profilesWithEmail: number
   profilesWithPhone: number
   profilesWithData: number
@@ -65,23 +67,25 @@ class AnalyticsService {
     if (customers.length > 0) {
       console.log('Analytics: Sample customer data structure:')
       const sampleCustomer = customers[0]
-      console.log(`  Customer ID: ${sampleCustomer.id}`)
-      console.log(`  Name: ${sampleCustomer.firstName} ${sampleCustomer.lastName}`)
-      console.log(`  Email: ${sampleCustomer.email}`)
-      console.log(`  Emails array: ${JSON.stringify(sampleCustomer.emails)}`)
-      console.log(`  Phones array: ${JSON.stringify(sampleCustomer.phones)}`)
-      console.log(`  MetaData: ${JSON.stringify(sampleCustomer.metaData)}`)
-      console.log(`  Tags: ${JSON.stringify(sampleCustomer.tags)}`)
-      console.log(`  CreatedAt: ${sampleCustomer.createdAt}`)
+      if (sampleCustomer) {
+        console.log(`  Customer ID: ${sampleCustomer.id}`)
+        console.log(`  Name: ${sampleCustomer.firstName} ${sampleCustomer.lastName}`)
+        console.log(`  Email: ${sampleCustomer.email}`)
+        console.log(`  Emails array: ${JSON.stringify(sampleCustomer.emails)}`)
+        console.log(`  Phones array: ${JSON.stringify(sampleCustomer.phones)}`)
+        console.log(`  MetaData: ${JSON.stringify(sampleCustomer.metaData)}`)
+        console.log(`  Tags: ${JSON.stringify(sampleCustomer.tags)}`)
+        console.log(`  CreatedAt: ${sampleCustomer.createdAt}`)
+      }
     }
 
     // Analyze orders and customers using Python script logic
-    const { associateStats, guestCounts, customersWithWeddingTag } = this.analyzeOrdersForDataCapture(
-      orders, customers, startDate, endDate
+    const { associateStats, guestCounts } = this.analyzeOrdersForDataCapture(
+      orders, customers
     )
 
     // Calculate data capture rates using Python script logic
-    const results = this.calculateDataCaptureRates(associateStats, guestCounts, customersWithWeddingTag)
+    const results = this.calculateDataCaptureRates(associateStats, guestCounts)
 
     // Convert to our interface format
     const associateMetrics: AssociateMetrics[] = results
@@ -89,6 +93,7 @@ class AnalyticsService {
       .map(r => ({
         name: r.associate,
         profilesCreated: r.newProfiles,
+        manualProfiles: r.manualProfiles,
         profilesWithEmail: r.withEmail,
         profilesWithPhone: r.withPhone,
         profilesWithData: r.withData,
@@ -130,12 +135,10 @@ class AnalyticsService {
 
   private analyzeOrdersForDataCapture(
     orders: any[],
-    customers: any[],
-    startDate: Date,
-    endDate: Date
-  ): { associateStats: Map<string, any>, guestCounts: Map<string, number>, customersWithWeddingTag: Set<string> } {
+    customers: any[]
+  ): { associateStats: Map<string, any>, guestCounts: Map<string, number> } {
     
-    // Initialize data structures matching Python script
+    // Initialize data structures
     const associateStats = new Map<string, {
       profilesCreated: Set<string>
       profilesWithEmail: Set<string>
@@ -144,52 +147,83 @@ class AnalyticsService {
       profilesWithDataNoWedding: Set<string>
       profilesWithSubscription: Set<string>
       profilesWithWeddingTag: Set<string>
+      manuallyCreatedProfiles: Set<string> // New: track manual creations
       totalOrders: number
     }>()
 
     const guestCounts = new Map<string, number>()
-    const customersSeen = new Map<string, { firstOrderDate: string, associate: string }>()
     const customersWithWeddingTag = new Set<string>()
+    const manuallyCreatedCustomers = new Map<string, string>() // customerId -> associate name
 
-    // First, check all customers for wedding tags (matching Python logic)
-    console.log(`Analytics: Checking ${customers.length} customers for wedding lead tags...`)
+    // First pass: identify all manually created customers with metadata
+    console.log('Analytics: Checking for manually created profiles with associate attribution...')
     for (const customer of customers) {
-      if (customer.tags) {
-        for (const tag of customer.tags) {
-          if (tag.id === WEDDING_LEAD_TAG_ID) {
-            customersWithWeddingTag.add(customer.id)
-            break
-          }
+      if (customer.metaData && customer.metaData['associate-sign-up-attribution']) {
+        const attributedAssociate = customer.metaData['associate-sign-up-attribution']
+        console.log(`  Found manual profile: ${customer.firstName} ${customer.lastName} attributed to "${attributedAssociate}"`)
+        manuallyCreatedCustomers.set(customer.id, attributedAssociate)
+      }
+    }
+    console.log(`Analytics: Found ${manuallyCreatedCustomers.size} manually created profiles with attribution`)
+
+    // Get list of all known associates from orders
+    const knownAssociates = new Set<string>()
+    for (const order of orders) {
+      const associateName = this.extractAssociateName(order)
+      if (associateName !== 'Unknown') {
+        knownAssociates.add(associateName)
+      }
+    }
+
+    // Match metadata names to actual associates
+    const metadataToAssociateMap = new Map<string, string>()
+    for (const [customerId, metadataName] of manuallyCreatedCustomers.entries()) {
+      const matchResult = findBestAssociateMatch(metadataName, Array.from(knownAssociates))
+      if (matchResult) {
+        console.log(`  Matched "${metadataName}" to "${matchResult.match}" (confidence: ${matchResult.confidence.toFixed(1)}%)`)
+        metadataToAssociateMap.set(customerId, matchResult.match)
+      } else {
+        console.log(`  Could not match "${metadataName}" to any known associate`)
+        metadataToAssociateMap.set(customerId, `Manual Entry - ${metadataName}`)
+      }
+    }
+
+    // Process wedding tag customers
+    for (const customer of customers) {
+      if (customer.tags && Array.isArray(customer.tags)) {
+        const hasWeddingTag = customer.tags.some((tag: any) => 
+          tag.id === WEDDING_LEAD_TAG_ID || 
+          (typeof tag === 'string' && tag === WEDDING_LEAD_TAG_ID)
+        )
+        if (hasWeddingTag) {
+          customersWithWeddingTag.add(customer.id)
         }
       }
     }
 
-    // Create a mapping of customer_id to their first associate (from orders)
+    // Track which customers are associated with which associates through orders
     const customerToAssociate = new Map<string, string>()
-    const sortedOrders = orders.sort((a, b) => 
-      new Date(a.orderPaidDate).getTime() - new Date(b.orderPaidDate).getTime()
-    )
+    const sortedOrders = [...orders].sort((a, b) => {
+      const dateA = new Date(a.orderPaidDate || a.orderDate || 0).getTime()
+      const dateB = new Date(b.orderPaidDate || b.orderDate || 0).getTime()
+      return dateA - dateB
+    })
 
-    console.log(`Analytics: Analyzing ${sortedOrders.length} orders to map customers to associates...`)
-
+    // Process orders
     for (const order of sortedOrders) {
-      // Get associate name (matching Python logic)
-      let associateName = "Unknown"
-      if (order.salesAssociate) {
-        if (typeof order.salesAssociate === 'object' && order.salesAssociate.name) {
-          associateName = order.salesAssociate.name
-        } else if (typeof order.salesAssociate === 'string') {
-          associateName = order.salesAssociate
-        }
-      }
+      const associateName = this.extractAssociateName(order)
+      const customer = order.customer
+      const customerId = customer?.id
 
-      // Get customer info - handle None customer field
-      const customer = order.customer || {}
-      const customerId = customer.id
-
-      // Map customer to their first associate (chronologically)
       if (customerId && !customerToAssociate.has(customerId)) {
-        customerToAssociate.set(customerId, associateName)
+        // Check if this customer was manually created first
+        if (metadataToAssociateMap.has(customerId)) {
+          // Use the attributed associate from metadata
+          customerToAssociate.set(customerId, metadataToAssociateMap.get(customerId)!)
+        } else {
+          // Use the order's associate
+          customerToAssociate.set(customerId, associateName)
+        }
       }
 
       // Initialize associate stats if needed
@@ -202,6 +236,7 @@ class AnalyticsService {
           profilesWithDataNoWedding: new Set(),
           profilesWithSubscription: new Set(),
           profilesWithWeddingTag: new Set(),
+          manuallyCreatedProfiles: new Set(),
           totalOrders: 0
         })
       }
@@ -209,7 +244,7 @@ class AnalyticsService {
       // Track orders for this associate
       associateStats.get(associateName)!.totalOrders++
 
-      // Count guest count from items (matching Python logic)
+      // Count guest count from items
       const items = order.items || []
       for (const item of items) {
         if (item.productId === GUEST_COUNT_SKU_ID) {
@@ -217,48 +252,24 @@ class AnalyticsService {
           guestCounts.set(associateName, (guestCounts.get(associateName) || 0) + quantity)
         }
       }
-
-      // Also check direct guestCount field if it exists
-      if (order.guestCount) {
-        guestCounts.set(associateName, (guestCounts.get(associateName) || 0) + order.guestCount)
-      }
     }
 
-    // Now process ALL customers (not just those with orders) - matching Python logic
-    console.log(`Analytics: Processing ${customers.length} customers for data capture...`)
-
+    // Process all customers for data capture metrics
     for (const customer of customers) {
       const customerId = customer.id
       if (!customerId) continue
 
-      // Check emails and phones - handle both single fields and arrays (matching Python)
-      let customerEmails = customer.emails || []
-      let customerPhones = customer.phones || []
-
-      // Also check single email/phone fields for backwards compatibility
-      if (customer.email && customerEmails.length === 0) {
-        customerEmails = [customer.email]
-      }
-      if (customer.phone && customerPhones.length === 0) {
-        customerPhones = [customer.phone]
-      }
-
-      // Check email marketing status
-      const emailMarketingStatus = customer.emailMarketingStatus || ""
-      const hasEmail = customerEmails.length > 0
-      const hasPhone = customerPhones.length > 0
-      const isSubscribed = emailMarketingStatus === "Subscribed"
-
-      // Check if this customer has wedding tag
-      const hasWeddingTag = customersWithWeddingTag.has(customerId)
-
-      // Determine which associate this customer belongs to (matching Python logic)
+      // Determine the associate for this customer
       let associateName: string
-      if (customerToAssociate.has(customerId)) {
+      if (metadataToAssociateMap.has(customerId)) {
+        // This was a manually created profile
+        associateName = metadataToAssociateMap.get(customerId)!
+      } else if (customerToAssociate.has(customerId)) {
+        // This customer has orders
         associateName = customerToAssociate.get(customerId)!
       } else {
-        // Customer has no orders - attribute to company
-        if (hasWeddingTag) {
+        // Customer has no orders and no metadata
+        if (customersWithWeddingTag.has(customerId)) {
           associateName = "Wedding Leads (No Orders)"
         } else {
           associateName = "Company (No Orders)"
@@ -275,20 +286,32 @@ class AnalyticsService {
           profilesWithDataNoWedding: new Set(),
           profilesWithSubscription: new Set(),
           profilesWithWeddingTag: new Set(),
+          manuallyCreatedProfiles: new Set(),
           totalOrders: 0
         })
       }
 
       const stats = associateStats.get(associateName)!
 
-      // Count as new profile for this associate/company
-      stats.profilesCreated.add(customerId)
+      // Check data capture
+      const customerEmails = this.extractCustomerEmails(customer)
+      const customerPhones = this.extractCustomerPhones(customer)
+      const hasEmail = customerEmails.length > 0
+      const hasPhone = customerPhones.length > 0
+      const isSubscribed = customer.emailMarketingStatus === "Subscribed"
+      const hasWeddingTag = customersWithWeddingTag.has(customerId)
 
-      // Check for data capture (matching Python logic)
+      // Track the profile
+      stats.profilesCreated.add(customerId)
+      
+      // Track if manually created
+      if (manuallyCreatedCustomers.has(customerId)) {
+        stats.manuallyCreatedProfiles.add(customerId)
+      }
+
       if (hasEmail) {
         stats.profilesWithEmail.add(customerId)
         stats.profilesWithData.add(customerId)
-        // Also track non-wedding leads separately
         if (!hasWeddingTag) {
           stats.profilesWithDataNoWedding.add(customerId)
         }
@@ -296,27 +319,38 @@ class AnalyticsService {
 
       if (hasPhone) {
         stats.profilesWithPhone.add(customerId)
-        if (!stats.profilesWithData.has(customerId)) {
-          stats.profilesWithData.add(customerId)
-          // Also track non-wedding leads separately
-          if (!hasWeddingTag) {
-            stats.profilesWithDataNoWedding.add(customerId)
-          }
+        stats.profilesWithData.add(customerId)
+        if (!hasWeddingTag) {
+          stats.profilesWithDataNoWedding.add(customerId)
         }
       }
 
-      // Check for email subscription
       if (isSubscribed) {
         stats.profilesWithSubscription.add(customerId)
       }
 
-      // Track wedding leads
       if (hasWeddingTag) {
         stats.profilesWithWeddingTag.add(customerId)
       }
     }
 
-    // Convert sets to counts (matching Python logic)
+    // Log summary of manual attributions
+    const manualAttributionSummary = new Map<string, number>()
+    for (const associate of associateStats.keys()) {
+      const manualCount = associateStats.get(associate)!.manuallyCreatedProfiles.size
+      if (manualCount > 0) {
+        manualAttributionSummary.set(associate, manualCount)
+      }
+    }
+    
+    if (manualAttributionSummary.size > 0) {
+      console.log('\nAnalytics: Manual Profile Attribution Summary:')
+      for (const [associate, count] of manualAttributionSummary.entries()) {
+        console.log(`  ${associate}: ${count} manually created profiles`)
+      }
+    }
+
+    // Convert sets to counts
     const finalStats = new Map<string, any>()
     for (const [associate, stats] of associateStats.entries()) {
       finalStats.set(associate, {
@@ -327,11 +361,12 @@ class AnalyticsService {
         profilesWithDataNoWedding: stats.profilesWithDataNoWedding.size,
         profilesWithSubscription: stats.profilesWithSubscription.size,
         profilesWithWeddingTag: stats.profilesWithWeddingTag.size,
+        manuallyCreatedProfiles: stats.manuallyCreatedProfiles.size,
         totalOrders: stats.totalOrders
       })
     }
 
-    // Debug output (matching Python script)
+    // Debug output
     console.log(`Analytics: Processed ${customers.length} total customers`)
     console.log(`Analytics: Found ${customersWithWeddingTag.size} customers with wedding lead tag`)
     console.log(`Analytics: Customers with orders: ${customerToAssociate.size}`)
@@ -344,16 +379,16 @@ class AnalyticsService {
       console.log("Analytics: WARNING: No guest counts found! Check if guest SKUs are being used in orders.")
     }
 
-    return { associateStats: finalStats, guestCounts, customersWithWeddingTag }
+    return { associateStats: finalStats, guestCounts }
   }
 
   private calculateDataCaptureRates(
     associateStats: Map<string, any>,
-    guestCounts: Map<string, number>,
-    customersWithWeddingTag: Set<string>
+    guestCounts: Map<string, number>
   ): Array<{
     associate: string
     newProfiles: number
+    manualProfiles: number
     withEmail: number
     withPhone: number
     withData: number
@@ -371,6 +406,8 @@ class AnalyticsService {
     const allAssociates = new Set([...associateStats.keys(), ...guestCounts.keys()])
 
     for (const associate of allAssociates) {
+      if (associate.includes('***')) continue
+      
       const stats = associateStats.get(associate) || {
         profilesCreated: 0,
         profilesWithEmail: 0,
@@ -379,6 +416,7 @@ class AnalyticsService {
         profilesWithDataNoWedding: 0,
         profilesWithSubscription: 0,
         profilesWithWeddingTag: 0,
+        manuallyCreatedProfiles: 0,
         totalOrders: 0
       }
 
@@ -395,6 +433,7 @@ class AnalyticsService {
       results.push({
         associate,
         newProfiles: stats.profilesCreated,
+        manualProfiles: stats.manuallyCreatedProfiles, // New field
         withEmail: stats.profilesWithEmail,
         withPhone: stats.profilesWithPhone,
         withData: stats.profilesWithData,
@@ -445,6 +484,7 @@ class AnalyticsService {
     results.push({
       associate: "*** ASSOCIATE DATA CAPTURE RATE ***",
       newProfiles: associatesWithGuests.reduce((sum, r) => sum + r.newProfiles, 0),
+      manualProfiles: associatesWithGuests.reduce((sum, r) => sum + r.manualProfiles, 0),
       withEmail: associatesWithGuests.reduce((sum, r) => sum + r.withEmail, 0),
       withPhone: associatesWithGuests.reduce((sum, r) => sum + r.withPhone, 0),
       withData: associateProfilesWithData,
@@ -460,6 +500,7 @@ class AnalyticsService {
     results.push({
       associate: "*** COMPANY DATA CAPTURE RATE ***",
       newProfiles: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.newProfiles, 0),
+      manualProfiles: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.manualProfiles, 0),
       withEmail: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.withEmail, 0),
       withPhone: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.withPhone, 0),
       withData: totalProfilesWithData,
@@ -475,6 +516,7 @@ class AnalyticsService {
     results.push({
       associate: "*** COMPANY DATA CAPTURE RATE LESS WEDDING LEADS ***",
       newProfiles: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.newProfiles, 0),
+      manualProfiles: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.manualProfiles, 0),
       withEmail: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.withEmail, 0),
       withPhone: results.filter(r => r.associate && !r.associate.includes('***')).reduce((sum, r) => sum + r.withPhone, 0),
       withData: totalProfilesWithDataNoWedding,
@@ -523,6 +565,41 @@ class AnalyticsService {
     }
 
     return comparisons
+  }
+
+  // Add helper method for extracting associate name
+  private extractAssociateName(order: any): string {
+    if (order.salesAssociate) {
+      if (typeof order.salesAssociate === 'object' && order.salesAssociate.name) {
+        return order.salesAssociate.name
+      } else if (typeof order.salesAssociate === 'string') {
+        return order.salesAssociate
+      }
+    }
+    return 'Unknown'
+  }
+
+  // Add helper methods for extracting customer data
+  private extractCustomerEmails(customer: any): string[] {
+    const emails = []
+    if (customer.emails && Array.isArray(customer.emails)) {
+      emails.push(...customer.emails.map((e: any) => e.email || e))
+    }
+    if (customer.email && !emails.includes(customer.email)) {
+      emails.push(customer.email)
+    }
+    return emails.filter(e => e)
+  }
+
+  private extractCustomerPhones(customer: any): string[] {
+    const phones = []
+    if (customer.phones && Array.isArray(customer.phones)) {
+      phones.push(...customer.phones.map((p: any) => p.phone || p))
+    }
+    if (customer.phone && !phones.includes(customer.phone)) {
+      phones.push(customer.phone)
+    }
+    return phones.filter(p => p)
   }
 }
 

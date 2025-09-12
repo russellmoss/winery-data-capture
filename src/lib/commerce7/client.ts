@@ -345,6 +345,10 @@ class Commerce7Client {
   async getCustomersByDateRange(startDate: Date, endDate: Date): Promise<C7Customer[]> {
     console.log(`Commerce7: Fetching customers from ${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`)
     
+    // Fix: Add one day to endDate to make the range inclusive of the end date
+    const inclusiveEndDate = new Date(endDate)
+    inclusiveEndDate.setDate(inclusiveEndDate.getDate() + 1)
+    
     let allCustomers: C7Customer[] = []
     let page = 1
     let hasMorePages = true
@@ -352,7 +356,7 @@ class Commerce7Client {
     while (hasMorePages) {
       const response = await this.client.get('/customer', {
         params: {
-          createdAt: `btw:${startDate.toISOString().split('T')[0]}|${endDate.toISOString().split('T')[0]}`,
+          createdAt: `btw:${startDate.toISOString().split('T')[0]}|${inclusiveEndDate.toISOString().split('T')[0]}`,
           page: page,
           limit: 50 // Commerce7 maximum limit
         }
