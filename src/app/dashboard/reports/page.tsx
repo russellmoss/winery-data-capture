@@ -28,6 +28,8 @@ export default function ReportsPage() {
   const [yearComparison, setYearComparison] = useState<MonthlyComparison[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isCached, setIsCached] = useState(false)
+  const [cacheTimestamp, setCacheTimestamp] = useState<string | null>(null)
 
   useEffect(() => {
     if (reportType === 'last30') {
@@ -44,19 +46,20 @@ export default function ReportsPage() {
     }
   }, [reportType])
 
-  const fetchMetrics = async (start: Date, end: Date) => {
+  const fetchMetrics = async (start: Date, end: Date, refresh = false) => {
     try {
       setLoading(true)
       setError(null)
       
-      console.log(`Reports: Fetching metrics for date range: ${start.toISOString()} to ${end.toISOString()}`)
+      console.log(`Reports: Fetching metrics for date range: ${start.toISOString()} to ${end.toISOString()}${refresh ? ' (refresh requested)' : ''}`)
       
       const response = await fetch('/api/analytics/metrics', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           startDate: start.toISOString(),
-          endDate: end.toISOString()
+          endDate: end.toISOString(),
+          refresh
         })
       })
 
@@ -64,6 +67,8 @@ export default function ReportsPage() {
       
       const data = await response.json()
       setMetrics(data)
+      setIsCached(data.cached || false)
+      setCacheTimestamp(data.cacheTimestamp || null)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -85,6 +90,14 @@ export default function ReportsPage() {
       setError(err.message)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleRefresh = () => {
+    if (reportType === 'yearByMonth') {
+      fetchYearComparison()
+    } else {
+      fetchMetrics(startDate, endDate, true)
     }
   }
 
@@ -164,6 +177,38 @@ export default function ReportsPage() {
         >
           Year by Month
         </button>
+      </div>
+
+      {/* Refresh Button and Cache Status */}
+      <div className="mt-4 flex items-center justify-between">
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center space-x-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span>{loading ? 'Refreshing...' : 'Refresh Report'}</span>
+          </button>
+          
+          {isCached && cacheTimestamp && (
+            <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              <span>Cached data from {new Date(cacheTimestamp).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+        
+        {loading && (
+          <div className="flex items-center space-x-2 text-sm text-gray-600">
+            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600"></div>
+            <span>Loading analytics data...</span>
+          </div>
+        )}
       </div>
 
       {/* Date Picker for Custom Range */}

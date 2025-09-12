@@ -3,7 +3,7 @@ import { C7Customer, C7Order, C7Associate } from './types'
 import { env } from '@/lib/env'
 import { handleError, ApiError, ValidationError } from '@/lib/errors'
 
-const DATA_CAPTURE_TAG_ID = "tag/d8dd1c0a-86d9-4224-b215-a70c4e5370b0"
+const DATA_CAPTURE_TAG_ID = "d8dd1c0a-86d9-4224-b215-a70c4e5370b0" // Without tag/ prefix to match Python script
 
 interface RetryConfig {
   retries: number
@@ -354,8 +354,7 @@ class Commerce7Client {
         params: {
           createdAt: `btw:${startDate.toISOString().split('T')[0]}|${endDate.toISOString().split('T')[0]}`,
           page: page,
-          limit: 50, // Commerce7 maximum limit
-          include: 'tags,metadata' // Try to explicitly include tags and metadata
+          limit: 50 // Commerce7 maximum limit
         }
       })
       
