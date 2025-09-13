@@ -173,9 +173,9 @@ ${topPerformers.map(a => `- ${a.name}: ${a.captureRate.toFixed(2)}% capture, ${a
 ASSOCIATES NEEDING SUPPORT:
 ${needsSupport.map(a => `- ${a.name}: ${a.captureRate.toFixed(2)}% capture, ${a.guestCount} guests, ${a.profilesCreated} profiles`).join('\n')}
 
-WEDDING LEADS IMPACT:
+${metrics.weddingSettings.showWeddingMetrics ? `WEDDING LEADS IMPACT:
 - Wedding leads represent ${((weddingLeads/totalProfiles)*100).toFixed(1)}% of total profiles
-- Company capture rate excluding weddings: ${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%
+- Company capture rate excluding weddings: ${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%` : ''}
 
 Please provide a structured analysis with these exact sections. Follow the format EXACTLY as shown:
 

@@ -2,6 +2,8 @@ import { commerce7Client } from '@/lib/commerce7/client'
 import { startOfMonth, endOfMonth, subYears, format } from 'date-fns'
 import { findBestAssociateMatch } from './nameMatching'
 import { C7Order, C7Customer } from '@/lib/commerce7/types'
+import { createClient } from '../supabase/server'
+import { getWeddingSettings, WeddingSettings } from '@/lib/settings/wedding-settings'
 
 // Extended customer type for analytics with email marketing status
 interface C7CustomerWithMarketing extends C7Customer {
@@ -35,8 +37,44 @@ interface FinalStats {
 }
 
 // Constants from Commerce7 - matching tasting_room_data_capture.py exactly
-const GUEST_COUNT_SKU_ID = "7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"
+// Note: GUEST_COUNT_SKU_ID is now configurable via database, see getGuestCountSkus()
 const WEDDING_LEAD_TAG_ID = "7c3b92b9-e048-4f5d-b156-e2d52c2779a6" // Without tag/ prefix to match Python script
+
+// Interface for guest count SKU configuration (used in getGuestCountSkus function)
+interface GuestCountSKU {
+  id: string
+  name: string
+  sku_id: string
+}
+
+// Function to fetch guest count SKUs from database
+async function getGuestCountSkus(): Promise<string[]> {
+  try {
+    const supabase = await createClient()
+    const { data, error } = await supabase
+      .from('guest_count_skus')
+      .select('sku_id')
+      .order('created_at', { ascending: true })
+
+    if (error) {
+      console.error('Error fetching guest count SKUs:', error)
+      // Fallback to hardcoded SKU if database fails
+      return ["7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"]
+    }
+
+    if (!data || data.length === 0) {
+      console.warn('No guest count SKUs configured, using fallback')
+      // Fallback to hardcoded SKU if none configured
+      return ["7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"]
+    }
+
+    return data.map(sku => sku.sku_id)
+  } catch (error) {
+    console.error('Error fetching guest count SKUs:', error)
+    // Fallback to hardcoded SKU if database fails
+    return ["7a5d9556-33e4-4d97-a3e8-37adefc6dcf0"]
+  }
+}
 
 export interface DataCaptureMetrics {
   period: string
@@ -44,6 +82,7 @@ export interface DataCaptureMetrics {
   endDate: Date
   associates: AssociateMetrics[]
   companyMetrics: CompanyMetrics
+  weddingSettings: WeddingSettings
 }
 
 export interface AssociateMetrics {
@@ -101,10 +140,15 @@ class AnalyticsService {
     
     console.log(`Analytics: Data fetch complete - ${orders.length} orders, ${customers.length} customers`)
 
+    // Fetch configurable guest count SKUs
+    console.log('Analytics: Fetching guest count SKU configuration...')
+    const guestCountSkus = await getGuestCountSkus()
+    console.log(`Analytics: Using ${guestCountSkus.length} guest count SKUs:`, guestCountSkus)
+
     // Analyze orders and customers using Python script logic
     console.log('Analytics: Starting data analysis...')
     const { associateStats, guestCounts } = this.analyzeOrdersForDataCapture(
-      orders, customers
+      orders, customers, guestCountSkus
     )
 
     // Calculate data capture rates using Python script logic
@@ -156,18 +200,24 @@ class AnalyticsService {
 
     console.log(`Analytics: Processing complete - ${associateMetrics.length} associates analyzed`)
     
+    // Fetch wedding settings
+    console.log('Analytics: Fetching wedding settings...')
+    const weddingSettings = await getWeddingSettings()
+    
     return {
       period: `${format(startDate, 'MMM dd, yyyy')} - ${format(endDate, 'MMM dd, yyyy')}`,
       startDate,
       endDate,
       associates: associateMetrics.sort((a, b) => b.captureRate - a.captureRate),
-      companyMetrics
+      companyMetrics,
+      weddingSettings
     }
   }
 
   private analyzeOrdersForDataCapture(
     orders: C7Order[],
-    customers: C7Customer[]
+    customers: C7Customer[],
+    guestCountSkus: string[]
   ): { associateStats: Map<string, FinalStats>, guestCounts: Map<string, number> } {
     
     // Initialize data structures
@@ -264,10 +314,10 @@ class AnalyticsService {
       // Track orders for this associate
       associateStats.get(associateName)!.totalOrders++
 
-      // Count guest count from items
+      // Count guest count from items using configurable SKUs
       const items = order.items || []
       for (const item of items) {
-        if (item.productId === GUEST_COUNT_SKU_ID) {
+        if (guestCountSkus.includes(item.productId)) {
           const quantity = item.quantity || 0
           guestCounts.set(associateName, (guestCounts.get(associateName) || 0) + quantity)
         }

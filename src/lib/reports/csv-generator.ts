@@ -53,11 +53,11 @@ export class CSVGenerator {
       { metric: 'Overall Subscription Rate', value: `${metrics.companyMetrics.overallSubscriptionRate.toFixed(2)}%` },
       { metric: 'Associate Data Capture Rate', value: `${metrics.companyMetrics.associateDataCaptureRate.toFixed(2)}%` },
       { metric: 'Company Data Capture Rate', value: `${metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%` },
-      { metric: 'Company Data Capture Rate (Less Weddings)', value: `${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%` },
+      ...(metrics.weddingSettings.showWeddingCaptureRate ? [{ metric: 'Company Data Capture Rate (Less Weddings)', value: `${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%` }] : []),
       { metric: 'Associate Data Subscription Rate', value: `${metrics.companyMetrics.associateDataSubscriptionRate.toFixed(2)}%` },
       { metric: 'Company Data Subscription Rate', value: `${metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%` },
-      { metric: 'Company Data Subscription Rate (Less Weddings)', value: `${metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%` },
-      { metric: 'Wedding Lead Profiles', value: metrics.companyMetrics.profilesWithWeddingLeadTag },
+      ...(metrics.weddingSettings.showWeddingSubscriptionRate ? [{ metric: 'Company Data Subscription Rate (Less Weddings)', value: `${metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%` }] : []),
+      ...(metrics.weddingSettings.showWeddingLeadProfiles ? [{ metric: 'Wedding Lead Profiles', value: metrics.companyMetrics.profilesWithWeddingLeadTag }] : []),
       { metric: 'Capture Rate Excluding Wedding Leads', value: `${metrics.companyMetrics.captureRateExcludingWeddingLeads.toFixed(2)}%` },
       { metric: 'Subscription Rate Excluding Wedding Leads', value: `${metrics.companyMetrics.subscriptionRateExcludingWeddingLeads.toFixed(2)}%` }
     ]

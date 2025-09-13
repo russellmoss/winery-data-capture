@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { UserPlus, BarChart3, LogOut, Menu, X } from 'lucide-react'
+import { UserPlus, BarChart3, Settings, LogOut, Menu, X } from 'lucide-react'
 
 export default function DashboardLayout({
   children
@@ -23,7 +23,8 @@ export default function DashboardLayout({
 
   const navigation = [
     { name: 'Create Profile', href: '/dashboard/create-profile', icon: UserPlus },
-    { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 }
+    { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
+    { name: 'Settings', href: '/dashboard/settings', icon: Settings }
   ]
 
   return (

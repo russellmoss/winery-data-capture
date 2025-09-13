@@ -187,8 +187,8 @@ export function generateReportHTML(
           <tbody>
             <tr><td style="padding: 12px; color: #4a5568;">Company Data Capture Rate</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #48bb78;">${metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%</td></tr>
             <tr style="background-color: #f8f9fa;"><td style="padding: 12px; color: #4a5568;">Company Subscription Rate</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #4299e1;">${metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%</td></tr>
-            <tr><td style="padding: 12px; color: #4a5568;">Wedding Lead Profiles</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #9f7aea;">${metrics.companyMetrics.profilesWithWeddingLeadTag}</td></tr>
-            <tr style="background-color: #f8f9fa;"><td style="padding: 12px; color: #4a5568;">Capture Rate (Excluding Weddings)</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #ed8936;">${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%</td></tr>
+            ${metrics.weddingSettings.showWeddingLeadProfiles ? `<tr><td style="padding: 12px; color: #4a5568;">Wedding Lead Profiles</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #9f7aea;">${metrics.companyMetrics.profilesWithWeddingLeadTag}</td></tr>` : ''}
+            ${metrics.weddingSettings.showWeddingCaptureRate ? `<tr style="background-color: #f8f9fa;"><td style="padding: 12px; color: #4a5568;">Capture Rate (Excluding Weddings)</td><td style="padding: 12px; text-align: right; font-weight: bold; color: #ed8936;">${metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%</td></tr>` : ''}
           </tbody>
         </table>
       </div>

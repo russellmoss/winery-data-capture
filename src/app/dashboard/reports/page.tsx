@@ -338,7 +338,13 @@ export default function ReportsPage() {
           </div>
           
           {/* Company Metrics Cards - Capture Rates */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className={`grid grid-cols-1 gap-4 mb-8 ${
+            metrics.weddingSettings.showWeddingCaptureRate && metrics.weddingSettings.showWeddingLeadProfiles 
+              ? 'md:grid-cols-4' 
+              : metrics.weddingSettings.showWeddingCaptureRate || metrics.weddingSettings.showWeddingLeadProfiles
+                ? 'md:grid-cols-3'
+                : 'md:grid-cols-2'
+          }`}>
             <div className="bg-white p-6 rounded-lg shadow">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA CAPTURE RATE</p>
@@ -367,32 +373,36 @@ export default function ReportsPage() {
               <p className="text-xs text-gray-500 mt-1">All associates</p>
             </div>
             
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE LESS WEDDINGS</p>
-                <MetricTooltip
-                  title="Company Data Capture Rate (Excluding Weddings)"
-                  content="This metric shows the data capture rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is capturing data from typical wine tasting visitors, without the influence of wedding inquiries which often have higher capture rates."
-                />
+            {metrics.weddingSettings.showWeddingCaptureRate && (
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE LESS WEDDINGS</p>
+                  <MetricTooltip
+                    title="Company Data Capture Rate (Excluding Weddings)"
+                    content="This metric shows the data capture rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is capturing data from typical wine tasting visitors, without the influence of wedding inquiries which often have higher capture rates."
+                  />
+                </div>
+                <p className="mt-2 text-3xl font-semibold text-gray-900">
+                  {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Excluding wedding leads</p>
               </div>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Excluding wedding leads</p>
-            </div>
+            )}
             
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-500">Wedding Lead Profiles</p>
-                <MetricTooltip
-                  title="Wedding Lead Profiles"
-                  content="This shows the total number of profiles created for potential wedding clients. These are guests who expressed interest in hosting events at the vineyard. Wedding leads typically have higher data capture rates since they're more motivated to provide contact information for follow-up."
-                />
+            {metrics.weddingSettings.showWeddingLeadProfiles && (
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-500">Wedding Lead Profiles</p>
+                  <MetricTooltip
+                    title="Wedding Lead Profiles"
+                    content="This shows the total number of profiles created for potential wedding clients. These are guests who expressed interest in hosting events at the vineyard. Wedding leads typically have higher data capture rates since they're more motivated to provide contact information for follow-up."
+                  />
+                </div>
+                <p className="mt-2 text-3xl font-semibold text-gray-900">
+                  {metrics.companyMetrics.profilesWithWeddingLeadTag}
+                </p>
               </div>
-              <p className="mt-2 text-3xl font-semibold text-gray-900">
-                {metrics.companyMetrics.profilesWithWeddingLeadTag}
-              </p>
-            </div>
+            )}
           </div>
 
           {/* Subscription Rate Metrics */}
@@ -401,7 +411,11 @@ export default function ReportsPage() {
           </div>
           
           {/* Company Metrics Cards - Subscription Rates */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className={`grid grid-cols-1 gap-4 mb-8 ${
+            metrics.weddingSettings.showWeddingSubscriptionRate 
+              ? 'md:grid-cols-3' 
+              : 'md:grid-cols-2'
+          }`}>
             <div className="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA SUBSCRIPTION RATE</p>
@@ -434,20 +448,22 @@ export default function ReportsPage() {
               <p className="text-xs text-gray-400 mt-1">All associates included</p>
             </div>
             
-            <div className="bg-white p-6 rounded-lg shadow border-l-4 border-purple-500">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-500">COMPANY SUBSCRIPTION RATE (NO WEDDINGS)</p>
-                <MetricTooltip
-                  title="Company Subscription Rate (Excluding Weddings)"
-                  content="This metric shows the email opt-in rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is converting typical wine tasting visitors into email subscribers, without the influence of wedding inquiries which often have higher subscription rates."
-                />
+            {metrics.weddingSettings.showWeddingSubscriptionRate && (
+              <div className="bg-white p-6 rounded-lg shadow border-l-4 border-purple-500">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-gray-500">COMPANY SUBSCRIPTION RATE (NO WEDDINGS)</p>
+                  <MetricTooltip
+                    title="Company Subscription Rate (Excluding Weddings)"
+                    content="This metric shows the email opt-in rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is converting typical wine tasting visitors into email subscribers, without the influence of wedding inquiries which often have higher subscription rates."
+                  />
+                </div>
+                <p className="mt-2 text-3xl font-semibold text-purple-600">
+                  {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Email opt-in excluding wedding leads</p>
+                <p className="text-xs text-gray-400 mt-1">Wedding leads excluded</p>
               </div>
-              <p className="mt-2 text-3xl font-semibold text-purple-600">
-                {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%
-              </p>
-              <p className="text-xs text-gray-500 mt-1">Email opt-in excluding wedding leads</p>
-              <p className="text-xs text-gray-400 mt-1">Wedding leads excluded</p>
-            </div>
+            )}
           </div>
 
           {/* Bar Charts */}
