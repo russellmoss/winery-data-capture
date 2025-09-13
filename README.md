@@ -25,9 +25,11 @@ This system provides **actionable insights** that help you:
 
 See the system in action! Watch how this analytics platform transforms your tasting room data into actionable insights:
 
-<iframe width="560" height="315" src="https://drive.google.com/file/d/1rQ5clg--IammgB5Ie97MlBorFJx2HW_c/preview" frameborder="0" allowfullscreen></iframe>
+[![Winery Data Capture Demo](https://img.shields.io/badge/▶️-Watch%20Demo%20Video-red?style=for-the-badge&logo=youtube)](https://drive.google.com/file/d/1rQ5clg--IammgB5Ie97MlBorFJx2HW_c/view?usp=sharing)
 
-*[Direct link to video](https://drive.google.com/file/d/1rQ5clg--IammgB5Ie97MlBorFJx2HW_c/view?usp=sharing)*
+**📺 [Click here to watch the demonstration video](https://drive.google.com/file/d/1rQ5clg--IammgB5Ie97MlBorFJx2HW_c/view?usp=sharing)**
+
+*The video shows the complete system in action, including dashboard navigation, report generation, and wedding feature toggles.*
 
 ---
 
