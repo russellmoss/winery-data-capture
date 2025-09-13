@@ -17,8 +17,34 @@ import {
   ResponsiveContainer
 } from 'recharts'
 import { DataCaptureMetrics, MonthlyComparison } from '@/lib/analytics/service'
+import EmailReportButton from '@/components/EmailReportButton'
+import MetricTooltip from '@/components/MetricTooltip'
 
 type ReportType = 'last30' | 'last90' | 'today' | 'custom' | 'yearByMonth'
+
+// Cache helper functions
+const getCachedReportData = (reportType: ReportType) => {
+  try {
+    const cached = localStorage.getItem(`report-cache-${reportType}`)
+    return cached ? JSON.parse(cached) : null
+  } catch {
+    return null
+  }
+}
+
+const setCachedReportData = (reportType: ReportType, metrics: any, yearComparison: any) => {
+  try {
+    const cacheData = {
+      metrics,
+      yearComparison,
+      timestamp: Date.now(),
+      reportType
+    }
+    localStorage.setItem(`report-cache-${reportType}`, JSON.stringify(cacheData))
+  } catch (error) {
+    console.warn('Failed to cache report data:', error)
+  }
+}
 
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>('last30')
@@ -32,6 +58,20 @@ export default function ReportsPage() {
   const [cacheTimestamp, setCacheTimestamp] = useState<string | null>(null)
 
   useEffect(() => {
+    // Check if we have cached data that's still fresh (less than 5 minutes old)
+    const cachedData = getCachedReportData(reportType)
+    const isDataFresh = cachedData && (Date.now() - cachedData.timestamp) < 5 * 60 * 1000 // 5 minutes
+    
+    if (isDataFresh) {
+      console.log('📊 Using cached report data (fresh)')
+      setMetrics(cachedData.metrics)
+      setYearComparison(cachedData.yearComparison)
+      setCacheTimestamp(new Date(cachedData.timestamp).toLocaleString())
+      setIsCached(true)
+      return
+    }
+    
+    // Only fetch if we don't have fresh cached data
     if (reportType === 'last30') {
       fetchMetrics(subDays(new Date(), 30), new Date())
     } else if (reportType === 'last90') {
@@ -68,6 +108,9 @@ export default function ReportsPage() {
       const data = await response.json()
       setMetrics(data)
       setIsCached(data.cached || false)
+      
+      // Cache the data for future use
+      setCachedReportData(reportType, data, null)
       setCacheTimestamp(data.cacheTimestamp || null)
     } catch (err: any) {
       setError(err.message)
@@ -86,6 +129,9 @@ export default function ReportsPage() {
       
       const data = await response.json()
       setYearComparison(data)
+      
+      // Cache the year comparison data
+      setCachedReportData('yearByMonth', null, data)
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -94,6 +140,13 @@ export default function ReportsPage() {
   }
 
   const handleRefresh = () => {
+    // Clear cache when manually refreshing
+    try {
+      localStorage.removeItem(`report-cache-${reportType}`)
+    } catch (error) {
+      console.warn('Failed to clear cache:', error)
+    }
+    
     if (reportType === 'yearByMonth') {
       fetchYearComparison()
     } else {
@@ -184,7 +237,7 @@ export default function ReportsPage() {
         </button>
       </div>
 
-      {/* Refresh Button and Cache Status */}
+      {/* Action Buttons */}
       <div className="mt-4 flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <button
@@ -198,12 +251,27 @@ export default function ReportsPage() {
             <span>{loading ? 'Refreshing...' : 'Refresh Report'}</span>
           </button>
           
+          {/* Email Report Button - Always visible */}
+          <EmailReportButton
+            reportType={
+              reportType === 'last30' ? 'monthly' :
+              reportType === 'last90' ? 'quarterly' :
+              reportType === 'today' ? 'daily' :
+              reportType === 'yearByMonth' ? 'year-over-year' :
+              'custom'
+            }
+            {...(reportType === 'custom' && { startDate, endDate })}
+            disabled={loading}
+            existingMetrics={metrics}
+            existingYearComparison={yearComparison}
+          />
+          
           {isCached && cacheTimestamp && (
             <div className="flex items-center space-x-2 text-sm text-gray-600">
               <svg className="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
               </svg>
-              <span>Cached data from {new Date(cacheTimestamp).toLocaleString()}</span>
+              <span>📊 Cached data from {new Date(cacheTimestamp).toLocaleString()}</span>
             </div>
           )}
         </div>
@@ -258,36 +326,6 @@ export default function ReportsPage() {
         </div>
       )}
 
-      {/* Debug Information */}
-      {!loading && metrics && reportType !== 'yearByMonth' && (
-        <div className="mt-8 p-4 bg-gray-100 rounded-md">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Debug Information</h3>
-          <div className="text-xs text-gray-600 space-y-1">
-            <p>Date Range: {new Date(metrics.startDate).toISOString()} to {new Date(metrics.endDate).toISOString()}</p>
-            <p>Total Associates: {metrics.associates.length}</p>
-            <p>Total Profiles: {metrics.companyMetrics.totalProfiles}</p>
-            <p>Profiles with Data: {metrics.companyMetrics.totalProfilesWithData}</p>
-            <p>Total Guest Count: {metrics.companyMetrics.totalGuestCount}</p>
-            <p>Wedding Lead Profiles: {metrics.companyMetrics.profilesWithWeddingLeadTag}</p>
-            <p>Associate Data Capture Rate: {metrics.companyMetrics.associateDataCaptureRate.toFixed(2)}%</p>
-            <p>Company Data Capture Rate: {metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%</p>
-            <p>Company Data Capture Rate Less Weddings: {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%</p>
-            <p>Total Profiles with Subscription: {metrics.companyMetrics.totalProfilesWithSubscription}</p>
-            <p>Overall Subscription Rate: {metrics.companyMetrics.overallSubscriptionRate.toFixed(2)}%</p>
-            <p>Associate Data Subscription Rate: {metrics.companyMetrics.associateDataSubscriptionRate.toFixed(2)}%</p>
-            <p>Company Data Subscription Rate: {metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%</p>
-            <p>Company Data Subscription Rate Less Weddings: {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%</p>
-            <div className="mt-2">
-              <p className="font-medium">Associate Details:</p>
-              {metrics.associates.map((associate, index) => (
-                <p key={index} className="ml-2">
-                  {associate.name}: {associate.profilesCreated} profiles, {associate.profilesWithEmail} with email, {associate.profilesWithPhone} with phone, {associate.profilesWithData} with data, {associate.profilesWithSubscription} subscribed, {associate.guestCount} guests
-                </p>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Metrics Display for Last 30 Days or Custom Range */}
       {!loading && metrics && reportType !== 'yearByMonth' && (
@@ -302,7 +340,13 @@ export default function ReportsPage() {
           {/* Company Metrics Cards - Capture Rates */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
             <div className="bg-white p-6 rounded-lg shadow">
-              <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA CAPTURE RATE</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA CAPTURE RATE</p>
+                <MetricTooltip
+                  title="Associate Data Capture Rate"
+                  content="This measures how well individual associates are capturing guest data. It only includes associates who actually served guests (have a guest count > 0). This rate shows the percentage of guests that each associate successfully converted into profiles with contact information."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
                 {metrics.companyMetrics.associateDataCaptureRate.toFixed(2)}%
               </p>
@@ -310,7 +354,13 @@ export default function ReportsPage() {
             </div>
             
             <div className="bg-white p-6 rounded-lg shadow">
-              <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE</p>
+                <MetricTooltip
+                  title="Company Data Capture Rate"
+                  content="This is the overall data capture rate for the entire company, including all associates and all types of profiles. This includes regular guests, wedding leads, and any other profiles created. It represents the total percentage of all guests who were converted into profiles with contact information."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
                 {metrics.companyMetrics.companyDataCaptureRate.toFixed(2)}%
               </p>
@@ -318,7 +368,13 @@ export default function ReportsPage() {
             </div>
             
             <div className="bg-white p-6 rounded-lg shadow">
-              <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE LESS WEDDINGS</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">COMPANY DATA CAPTURE RATE LESS WEDDINGS</p>
+                <MetricTooltip
+                  title="Company Data Capture Rate (Excluding Weddings)"
+                  content="This metric shows the data capture rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is capturing data from typical wine tasting visitors, without the influence of wedding inquiries which often have higher capture rates."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
                 {metrics.companyMetrics.companyDataCaptureRateLessWeddings.toFixed(2)}%
               </p>
@@ -326,7 +382,13 @@ export default function ReportsPage() {
             </div>
             
             <div className="bg-white p-6 rounded-lg shadow">
-              <p className="text-sm font-medium text-gray-500">Wedding Lead Profiles</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">Wedding Lead Profiles</p>
+                <MetricTooltip
+                  title="Wedding Lead Profiles"
+                  content="This shows the total number of profiles created for potential wedding clients. These are guests who expressed interest in hosting events at the vineyard. Wedding leads typically have higher data capture rates since they're more motivated to provide contact information for follow-up."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-gray-900">
                 {metrics.companyMetrics.profilesWithWeddingLeadTag}
               </p>
@@ -341,7 +403,13 @@ export default function ReportsPage() {
           {/* Company Metrics Cards - Subscription Rates */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <div className="bg-white p-6 rounded-lg shadow border-l-4 border-blue-500">
-              <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA SUBSCRIPTION RATE</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">ASSOCIATE DATA SUBSCRIPTION RATE</p>
+                <MetricTooltip
+                  title="Associate Data Subscription Rate"
+                  content="This measures the email opt-in rate for associates who are actively tracking guests. It shows what percentage of guests captured by associates agreed to receive marketing emails. This is a key metric for measuring how well associates are not just collecting contact info, but getting permission for ongoing communication."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-blue-600">
                 {metrics.companyMetrics.associateDataSubscriptionRate.toFixed(2)}%
               </p>
@@ -352,7 +420,13 @@ export default function ReportsPage() {
             </div>
             
             <div className="bg-white p-6 rounded-lg shadow border-l-4 border-green-500">
-              <p className="text-sm font-medium text-gray-500">COMPANY DATA SUBSCRIPTION RATE</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">COMPANY DATA SUBSCRIPTION RATE</p>
+                <MetricTooltip
+                  title="Company Data Subscription Rate"
+                  content="This is the overall email opt-in rate for the entire company, including all associates and all types of profiles. It shows what percentage of all captured guests agreed to receive marketing emails. This includes regular guests, wedding leads, and any other profiles created."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-green-600">
                 {metrics.companyMetrics.companyDataSubscriptionRate.toFixed(2)}%
               </p>
@@ -361,7 +435,13 @@ export default function ReportsPage() {
             </div>
             
             <div className="bg-white p-6 rounded-lg shadow border-l-4 border-purple-500">
-              <p className="text-sm font-medium text-gray-500">COMPANY SUBSCRIPTION RATE (NO WEDDINGS)</p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-500">COMPANY SUBSCRIPTION RATE (NO WEDDINGS)</p>
+                <MetricTooltip
+                  title="Company Subscription Rate (Excluding Weddings)"
+                  content="This metric shows the email opt-in rate for regular tasting room guests only, excluding wedding lead profiles. This gives you a clearer picture of how well your team is converting typical wine tasting visitors into email subscribers, without the influence of wedding inquiries which often have higher subscription rates."
+                />
+              </div>
               <p className="mt-2 text-3xl font-semibold text-purple-600">
                 {metrics.companyMetrics.companyDataSubscriptionRateLessWeddings.toFixed(2)}%
               </p>

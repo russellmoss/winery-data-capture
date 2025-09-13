@@ -3,6 +3,9 @@ import { cookies } from 'next/headers'
 import { env } from '@/lib/env'
 import { handleError, ApiError } from '@/lib/errors'
 
+// Alias for compatibility with existing code
+export const createClient = createServerSupabaseClient
+
 export async function createServerSupabaseClient() {
   try {
     const cookieStore = await cookies()

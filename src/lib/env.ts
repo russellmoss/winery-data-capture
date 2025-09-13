@@ -11,6 +11,9 @@ const env = {
   C7_API_KEY: isServer ? process.env.C7_API_KEY : undefined,
   C7_TENANT_ID: isServer ? process.env.C7_TENANT_ID : undefined,
   SUPABASE_SERVICE_KEY: isServer ? process.env.SUPABASE_SERVICE_KEY : undefined,
+  EMAIL_USER: isServer ? process.env.EMAIL_USER : undefined,
+  EMAIL_APP_PASSWORD: isServer ? process.env.EMAIL_APP_PASSWORD : undefined,
+  ANTHROPIC_API_KEY: isServer ? process.env.ANTHROPIC_API_KEY : undefined,
   
   // Client-side variables (available on both client and server)
   NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ggfpkczvvnubjiuiqllv.supabase.co',
@@ -29,4 +32,7 @@ export const {
   C7_API_KEY,
   C7_TENANT_ID,
   SUPABASE_SERVICE_KEY,
+  EMAIL_USER,
+  EMAIL_APP_PASSWORD,
+  ANTHROPIC_API_KEY,
 } = env
